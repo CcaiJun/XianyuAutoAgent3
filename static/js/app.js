@@ -57,7 +57,8 @@ async function startMain() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-            }
+            },
+            body: JSON.stringify({})
         });
         
         const result = await response.json();
@@ -90,7 +91,8 @@ async function stopMain() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-            }
+            },
+            body: JSON.stringify({})
         });
         
         const result = await response.json();

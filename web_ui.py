@@ -114,6 +114,10 @@ def start_main():
         return jsonify({"status": "error", "message": "程序已在运行中"})
     
     try:
+        # 检查请求数据（可选）
+        data = request.get_json() or {}
+        app.logger.info(f"启动主程序请求: {data}")
+        
         # 启动主程序
         main_process = subprocess.Popen(
             [sys.executable, "main.py"],
@@ -131,9 +135,11 @@ def start_main():
         log_thread.daemon = True
         log_thread.start()
         
+        app.logger.info(f"主程序启动成功 (PID: {main_process.pid})")
         return jsonify({"status": "success", "message": "程序启动成功", "pid": main_process.pid})
         
     except Exception as e:
+        app.logger.error(f"启动主程序失败: {e}")
         return jsonify({"status": "error", "message": f"启动失败: {str(e)}"})
 
 @app.route('/api/stop', methods=['POST'])
@@ -145,6 +151,10 @@ def stop_main():
         return jsonify({"status": "error", "message": "程序未在运行"})
     
     try:
+        # 检查请求数据（可选）
+        data = request.get_json() or {}
+        app.logger.info(f"停止主程序请求: {data}")
+        
         # 优雅停止进程
         main_process.terminate()
         
@@ -159,9 +169,11 @@ def stop_main():
         process_status = "stopped"
         log_capture.stop_capture()
         
+        app.logger.info("主程序已停止")
         return jsonify({"status": "success", "message": "程序已停止"})
         
     except Exception as e:
+        app.logger.error(f"停止主程序失败: {e}")
         return jsonify({"status": "error", "message": f"停止失败: {str(e)}"})
 
 @app.route('/api/logs')
