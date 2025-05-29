@@ -71,6 +71,134 @@ class LogCapture:
 
 log_capture = LogCapture()
 
+def find_existing_main_process():
+    """查找已经运行的main.py进程"""
+    try:
+        current_dir = os.getcwd()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+            try:
+                if proc.info['name'] and 'python' in proc.info['name'].lower():
+                    if proc.info['cmdline'] and len(proc.info['cmdline']) >= 2:
+                        # 检查是否是python main.py命令
+                        cmdline = proc.info['cmdline']
+                        if any('main.py' in arg for arg in cmdline):
+                            # 进一步检查工作目录是否匹配
+                            try:
+                                if proc.info['cwd'] == current_dir:
+                                    return proc
+                            except (psutil.AccessDenied, KeyError):
+                                # 如果无法获取工作目录，仍然返回找到的进程
+                                return proc
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        print(f"查找进程时发生错误: {e}")
+    return None
+
+def attach_to_existing_process():
+    """连接到已存在的main.py进程"""
+    global main_process, process_status, last_heartbeat_time
+    
+    existing_proc = find_existing_main_process()
+    if existing_proc:
+        try:
+            # 创建一个假的subprocess对象来兼容现有代码
+            class ExistingProcess:
+                def __init__(self, psutil_proc):
+                    self.psutil_proc = psutil_proc
+                    self.pid = psutil_proc.pid
+                    self.stdout = None  # 无法获取已运行进程的输出
+                
+                def poll(self):
+                    """检查进程是否还在运行"""
+                    try:
+                        return None if self.psutil_proc.is_running() else 0
+                    except:
+                        return 0
+                
+                def terminate(self):
+                    """终止进程"""
+                    self.psutil_proc.terminate()
+                
+                def kill(self):
+                    """强制结束进程"""
+                    self.psutil_proc.kill()
+                
+                def wait(self, timeout=None):
+                    """等待进程结束"""
+                    try:
+                        self.psutil_proc.wait(timeout=timeout)
+                    except psutil.TimeoutExpired:
+                        raise subprocess.TimeoutExpired(cmd=None, timeout=timeout)
+            
+            main_process = ExistingProcess(existing_proc)
+            process_status = "running"
+            
+            # 设置初始心跳时间为当前时间
+            last_heartbeat_time = datetime.now()
+            
+            # 启动日志捕获
+            log_capture.start_capture()
+            
+            # 启动监控线程，包括文件日志读取
+            monitor_thread = threading.Thread(target=monitor_existing_process_with_logs, args=(existing_proc,))
+            monitor_thread.daemon = True
+            monitor_thread.start()
+            
+            print(f"已连接到现有main.py进程 (PID: {existing_proc.pid})")
+            return True
+        except Exception as e:
+            print(f"连接到现有进程失败: {e}")
+    return False
+
+def monitor_existing_process_with_logs(psutil_proc):
+    """监控已存在的进程并读取日志文件"""
+    global process_status, last_heartbeat_time
+    
+    # 记录日志文件的最后读取位置
+    log_file_path = "main.log"
+    last_position = 0
+    
+    # 如果日志文件存在，先读取现有内容的最后位置
+    if os.path.exists(log_file_path):
+        try:
+            with open(log_file_path, 'r', encoding='utf-8') as f:
+                f.seek(0, 2)  # 移动到文件末尾
+                last_position = f.tell()
+        except Exception:
+            pass
+    
+    while True:
+        try:
+            if not psutil_proc.is_running():
+                process_status = "stopped"
+                log_capture.stop_capture()
+                break
+            
+            # 读取新的日志内容
+            if os.path.exists(log_file_path):
+                try:
+                    with open(log_file_path, 'r', encoding='utf-8') as f:
+                        f.seek(last_position)
+                        new_lines = f.readlines()
+                        if new_lines:
+                            for line in new_lines:
+                                line = line.strip()
+                                if line:
+                                    # 添加到日志缓冲区
+                                    log_capture.add_log(line)
+                                    # 检查是否为心跳相关日志
+                                    if "心跳包已发送" in line or "收到心跳响应" in line:
+                                        last_heartbeat_time = datetime.now()
+                            last_position = f.tell()
+                except Exception as e:
+                    pass
+            
+            time.sleep(1)  # 每秒检查一次新日志
+            
+        except Exception as e:
+            break
+
 @app.route('/')
 def index():
     """主页面"""
@@ -109,6 +237,12 @@ def get_status():
 def start_main():
     """启动主程序"""
     global main_process, process_status
+    
+    # 首先检查是否已经有main.py进程在运行
+    if not main_process or main_process.poll() is not None:
+        # 尝试连接到已存在的进程
+        if attach_to_existing_process():
+            return jsonify({"status": "success", "message": "已连接到运行中的程序", "pid": main_process.pid})
     
     if main_process and main_process.poll() is None:
         return jsonify({"status": "error", "message": "程序已在运行中"})
@@ -296,5 +430,12 @@ if __name__ == '__main__':
     os.makedirs("templates", exist_ok=True)
     os.makedirs("static/css", exist_ok=True)
     os.makedirs("static/js", exist_ok=True)
+    
+    # 在启动时检查是否有已运行的main.py进程
+    print("检查是否有已运行的main.py进程...")
+    if attach_to_existing_process():
+        print("已自动连接到运行中的main.py进程")
+    else:
+        print("未发现运行中的main.py进程")
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True) 

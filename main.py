@@ -8,6 +8,10 @@ from loguru import logger
 from dotenv import load_dotenv
 from XianyuApis import XianyuApis
 
+# 配置loguru日志输出到文件，同时保持控制台输出
+logger.add("main.log", rotation="10 MB", retention="10 days", 
+           format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+           level="DEBUG")
 
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
 from XianyuAgent import XianyuReplyBot
