@@ -14,6 +14,69 @@ from collections import deque
 import signal
 import sys
 from dotenv import load_dotenv
+import pytz
+
+# 北京时区
+BEIJING_TZ = pytz.timezone('Asia/Shanghai')
+
+def get_beijing_time():
+    """获取当前北京时间"""
+    return datetime.now(BEIJING_TZ)
+
+def format_beijing_time(dt=None):
+    """格式化北京时间为字符串"""
+    if dt is None:
+        dt = get_beijing_time()
+    elif dt.tzinfo is None:
+        # 如果传入的是naive datetime，假设是UTC时间
+        dt = pytz.UTC.localize(dt).astimezone(BEIJING_TZ)
+    elif dt.tzinfo != BEIJING_TZ:
+        # 如果是其他时区，转换为北京时区
+        dt = dt.astimezone(BEIJING_TZ)
+    
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def convert_log_timestamp_to_beijing(message):
+    """将日志消息中的服务器本地时间戳转换为北京时间"""
+    import re
+    
+    # 匹配loguru格式的时间戳：YYYY-MM-DD HH:mm:ss.SSS
+    timestamp_pattern = r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{3})?)'
+    
+    def replace_timestamp(match):
+        timestamp_str = match.group(1)
+        try:
+            # 解析时间戳
+            if '.' in timestamp_str:
+                # 包含毫秒
+                dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+            else:
+                # 不包含毫秒
+                dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            
+            # 假设原始时间戳是服务器本地时间（naive datetime）
+            # 服务器当前在英国，时区为BST（英国夏令时）= UTC+1
+            # 北京时间 = UTC+8，所以北京时间比BST快7小时
+            
+            # 将服务器本地时间（BST）先转换为UTC，再转换为北京时间
+            bst_tz = pytz.timezone('Europe/London')
+            bst_dt = bst_tz.localize(dt)
+            # 转换为北京时间
+            beijing_dt = bst_dt.astimezone(BEIJING_TZ)
+            
+            # 返回格式化的北京时间（保留毫秒格式如果有的话）
+            if '.' in timestamp_str:
+                return beijing_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]  # 保留3位毫秒
+            else:
+                return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
+                
+        except Exception as e:
+            # 如果转换失败，返回原始时间戳
+            return timestamp_str
+    
+    # 替换消息中的所有时间戳
+    converted_message = re.sub(timestamp_pattern, replace_timestamp, message)
+    return converted_message
 
 # 加载Web UI配置
 def load_web_ui_config():
@@ -89,20 +152,23 @@ class LogCapture:
     def add_log(self, message):
         """添加日志到缓冲区"""
         if self.capturing:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # 转换消息中的时间戳为北京时间
+            converted_message = convert_log_timestamp_to_beijing(message)
+            
+            timestamp = format_beijing_time()
             log_entry = {
                 "timestamp": timestamp,
-                "message": message,
-                "type": self.get_log_type(message)
+                "message": converted_message,
+                "type": self.get_log_type(converted_message)
             }
             log_buffer.append(log_entry)
             # 实时推送到前端
             socketio.emit('new_log', log_entry)
             
             # 检查心跳信息
-            if "心跳包已发送" in message or "收到心跳响应" in message:
+            if "心跳包已发送" in converted_message or "收到心跳响应" in converted_message:
                 global last_heartbeat_time
-                last_heartbeat_time = datetime.now()
+                last_heartbeat_time = get_beijing_time()
                 socketio.emit('heartbeat_update', {
                     "status": "active",
                     "timestamp": timestamp
@@ -187,7 +253,7 @@ def attach_to_existing_process():
             process_status = "running"
             
             # 设置初始心跳时间为当前时间
-            last_heartbeat_time = datetime.now()
+            last_heartbeat_time = get_beijing_time()
             
             # 启动日志捕获
             log_capture.start_capture()
@@ -241,7 +307,7 @@ def monitor_existing_process_with_logs(psutil_proc):
                                     log_capture.add_log(line)
                                     # 检查是否为心跳相关日志
                                     if "心跳包已发送" in line or "收到心跳响应" in line:
-                                        last_heartbeat_time = datetime.now()
+                                        last_heartbeat_time = get_beijing_time()
                             last_position = f.tell()
                 except Exception as e:
                     pass
@@ -326,12 +392,19 @@ def get_status():
     heartbeat_time = None
     
     if last_heartbeat_time:
-        time_diff = (datetime.now() - last_heartbeat_time).total_seconds()
+        current_beijing_time = get_beijing_time()
+        # 确保last_heartbeat_time是带时区信息的datetime对象
+        if last_heartbeat_time.tzinfo is None:
+            last_heartbeat_beijing = BEIJING_TZ.localize(last_heartbeat_time)
+        else:
+            last_heartbeat_beijing = last_heartbeat_time.astimezone(BEIJING_TZ)
+        
+        time_diff = (current_beijing_time - last_heartbeat_beijing).total_seconds()
         if time_diff < 60:  # 1分钟内有心跳
             heartbeat_status = "active"
         else:
             heartbeat_status = "timeout"
-        heartbeat_time = last_heartbeat_time.strftime("%Y-%m-%d %H:%M:%S")
+        heartbeat_time = format_beijing_time(last_heartbeat_time)
     
     return jsonify({
         "process_status": process_status,
