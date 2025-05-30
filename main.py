@@ -7,6 +7,7 @@ import websockets
 from loguru import logger
 from dotenv import load_dotenv
 from XianyuApis import XianyuApis
+import sys
 
 # 配置loguru日志输出到文件，同时保持控制台输出
 logger.add("main.log", rotation="10 MB", retention="10 days", 
@@ -28,6 +29,15 @@ class XianyuLive:
         self.myid = self.cookies['unb']
         self.device_id = generate_device_id(self.myid)
         self.context_manager = ChatContextManager()
+        
+        # 程序启动时验证Session状态
+        logger.info("程序启动，验证Session状态...")
+        if not self.xianyu.hasLogin():
+            logger.error("⚠️ Session验证失败，Cookie可能已过期，程序即将退出")
+            logger.error("🔴 请更新.env文件中的COOKIES_STR后重新启动")
+            sys.exit(1)
+        else:
+            logger.info("✅ Session验证成功，Cookie状态正常")
         
         # 心跳相关配置
         self.heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL", "15"))  # 心跳间隔，默认15秒
