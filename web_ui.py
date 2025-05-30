@@ -583,6 +583,92 @@ def manage_env():
         except Exception as e:
             return jsonify({"status": "error", "message": f"保存失败: {str(e)}"})
 
+@app.route('/api/chats')
+@login_required
+def get_chats():
+    """获取聊天数据"""
+    try:
+        # 从日志中解析聊天数据
+        chat_data = parse_chat_from_logs()
+        return jsonify(list(chat_data.values()))
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"获取聊天数据失败: {str(e)}"})
+
+@app.route('/api/chats/<session_id>')
+@login_required
+def get_chat_messages(session_id):
+    """获取指定会话的聊天消息"""
+    try:
+        chat_data = parse_chat_from_logs()
+        if session_id in chat_data:
+            return jsonify(chat_data[session_id])
+        else:
+            return jsonify({"status": "error", "message": "会话不存在"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"获取聊天消息失败: {str(e)}"})
+
+def parse_chat_from_logs():
+    """从日志缓冲区中解析聊天数据"""
+    chat_data = {}
+    current_waiting_session = None
+    
+    for log_entry in log_buffer:
+        message = log_entry.get('message', '')
+        timestamp = log_entry.get('timestamp', '')
+        
+        # 解析用户消息
+        user_pattern = r'用户:\s*([^(]+)\s*\(ID:\s*(\d+)\),\s*商品:\s*(\d+),\s*会话:\s*(\d+),\s*消息:\s*(.+)'
+        user_match = re.match(user_pattern, message)
+        
+        if user_match:
+            user_name, user_id, product_id, session_id, user_message = user_match.groups()
+            user_name = user_name.strip()
+            user_message = user_message.strip()
+            
+            # 初始化会话数据
+            if session_id not in chat_data:
+                chat_data[session_id] = {
+                    'sessionId': session_id,
+                    'userName': user_name,
+                    'userId': user_id,
+                    'productId': product_id,
+                    'messages': [],
+                    'lastMessage': '',
+                    'lastTime': timestamp,
+                    'unreadCount': 0
+                }
+            
+            # 添加用户消息
+            chat_data[session_id]['messages'].append({
+                'type': 'user',
+                'content': user_message,
+                'timestamp': timestamp
+            })
+            chat_data[session_id]['lastMessage'] = user_message
+            chat_data[session_id]['lastTime'] = timestamp
+            current_waiting_session = session_id
+            
+        # 解析机器人回复
+        bot_pattern = r'机器人回复:\s*(.+)'
+        bot_match = re.match(bot_pattern, message)
+        
+        if bot_match and current_waiting_session:
+            bot_message = bot_match.group(1).strip()
+            
+            # 添加机器人回复到最近的会话
+            if current_waiting_session in chat_data:
+                chat_data[current_waiting_session]['messages'].append({
+                    'type': 'bot',
+                    'content': bot_message,
+                    'timestamp': timestamp
+                })
+                chat_data[current_waiting_session]['lastMessage'] = bot_message
+                chat_data[current_waiting_session]['lastTime'] = timestamp
+            
+            current_waiting_session = None
+    
+    return chat_data
+
 def monitor_logs(process):
     """监控主程序日志输出"""
     try:

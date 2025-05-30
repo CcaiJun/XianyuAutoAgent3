@@ -244,14 +244,36 @@ class XianyuLive:
     def is_system_message(self, message):
         """判断是否为系统消息"""
         try:
-            return (
+            # 如果消息包含聊天内容相关的字段，则不是系统消息
+            if (isinstance(message, dict) 
+                and "1" in message 
+                and isinstance(message["1"], dict)
+                and "10" in message["1"]
+                and isinstance(message["1"]["10"], dict)
+                and "reminderContent" in message["1"]["10"]):
+                logger.debug("消息包含聊天内容，不是系统消息")
+                return False
+                
+            # 原有的系统消息判断逻辑
+            is_system = (
                 isinstance(message, dict)
                 and "3" in message
                 and isinstance(message["3"], dict)
                 and "needPush" in message["3"]
                 and message["3"]["needPush"] == "false"
+                # 额外检查：真正的系统消息通常不包含聊天相关字段
+                and not ("1" in message and isinstance(message["1"], dict) and "10" in message["1"])
             )
-        except Exception:
+            
+            # 添加调试日志
+            if is_system:
+                logger.debug(f"检测到系统消息: {message.get('3', {})}")
+            elif "3" in message and isinstance(message["3"], dict):
+                logger.debug(f"消息包含'3'字段但不是系统消息: needPush={message['3'].get('needPush', 'missing')}")
+            
+            return is_system
+        except Exception as e:
+            logger.error(f"is_system_message判断出错: {e}")
             return False
 
     def check_toggle_keywords(self, message):
@@ -421,6 +443,10 @@ class XianyuLive:
             if self.is_manual_mode(chat_id):
                 logger.info(f"🔴 会话 {chat_id} 处于人工接管模式，跳过自动回复")
                 return
+            
+            # 调试：打印消息结构的关键字段
+            logger.debug(f"检查系统消息 - 消息字段'3': {message.get('3', 'missing')}")
+            
             if self.is_system_message(message):
                 logger.debug("系统消息，跳过处理")
                 return

@@ -4,6 +4,10 @@ let autoScroll = true;
 let currentPromptFile = '';
 let envData = {};
 
+// 聊天相关变量
+let chatData = new Map(); // 存储聊天数据，key为会话ID，value为聊天信息
+let currentChatId = null; // 当前选中的聊天ID
+
 // 认证相关函数
 async function checkAuthStatus() {
     try {
@@ -92,6 +96,7 @@ function initializeApp() {
     loadPrompts();
     loadEnv();
     loadHistoryLogs();
+    loadHistoryChats(); // 加载历史聊天数据
     
     // 设置定时刷新状态
     setInterval(refreshStatus, 5000);
@@ -315,6 +320,12 @@ function addLogEntry(logData, shouldScroll = true) {
     `;
     
     logContent.appendChild(logEntry);
+    
+    // 解析聊天消息
+    const chatInfo = parseLogForChatMessage(logData.message);
+    if (chatInfo) {
+        addChatMessage(chatInfo);
+    }
     
     // 限制日志条目数量
     const entries = logContent.children;
@@ -601,5 +612,264 @@ document.addEventListener('keydown', function(e) {
 document.addEventListener('shown.bs.tab', function(e) {
     if (e.target.id === 'env-tab') {
         loadEnv();
+    } else if (e.target.id === 'chat-tab') {
+        updateChatList();
     }
-}); 
+});
+
+// 聊天功能相关代码
+async function loadHistoryChats() {
+    try {
+        const response = await fetch('/api/chats');
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const chats = await handledResponse.json();
+        
+        // 清空现有聊天数据
+        chatData.clear();
+        
+        // 重新构建聊天数据
+        chats.forEach(chat => {
+            chatData.set(chat.sessionId, chat);
+        });
+        
+        // 更新聊天列表显示
+        updateChatList();
+        
+    } catch (error) {
+        console.error('加载历史聊天数据失败:', error);
+    }
+}
+
+function parseLogForChatMessage(logMessage) {
+    // 解析用户消息日志
+    const userPattern = /用户:\s*([^(]+)\s*\(ID:\s*(\d+)\),\s*商品:\s*(\d+),\s*会话:\s*(\d+),\s*消息:\s*(.+)/;
+    const userMatch = logMessage.match(userPattern);
+    
+    if (userMatch) {
+        const [, userName, userId, productId, sessionId, message] = userMatch;
+        return {
+            type: 'user_message',
+            userName: userName.trim(),
+            userId: userId,
+            productId: productId,
+            sessionId: sessionId,
+            message: message.trim(),
+            timestamp: new Date().toLocaleString('zh-CN')
+        };
+    }
+    
+    // 解析机器人回复日志
+    const botPattern = /机器人回复:\s*(.+)/;
+    const botMatch = logMessage.match(botPattern);
+    
+    if (botMatch) {
+        return {
+            type: 'bot_message',
+            message: botMatch[1].trim(),
+            timestamp: new Date().toLocaleString('zh-CN')
+        };
+    }
+    
+    return null;
+}
+
+function addChatMessage(chatInfo) {
+    if (!chatInfo) return;
+    
+    if (chatInfo.type === 'user_message') {
+        const sessionId = chatInfo.sessionId;
+        
+        // 获取或创建聊天会话
+        if (!chatData.has(sessionId)) {
+            chatData.set(sessionId, {
+                sessionId: sessionId,
+                userName: chatInfo.userName,
+                userId: chatInfo.userId,
+                productId: chatInfo.productId,
+                messages: [],
+                lastMessage: '',
+                lastTime: chatInfo.timestamp,
+                unreadCount: 0
+            });
+        }
+        
+        const chat = chatData.get(sessionId);
+        chat.messages.push({
+            type: 'user',
+            content: chatInfo.message,
+            timestamp: chatInfo.timestamp
+        });
+        chat.lastMessage = chatInfo.message;
+        chat.lastTime = chatInfo.timestamp;
+        
+        // 如果不是当前选中的聊天，增加未读数
+        if (currentChatId !== sessionId) {
+            chat.unreadCount++;
+        }
+        
+        // 等待机器人回复
+        chat.waitingForBot = true;
+        
+    } else if (chatInfo.type === 'bot_message') {
+        // 找到最近等待回复的聊天
+        let targetChat = null;
+        for (let [sessionId, chat] of chatData) {
+            if (chat.waitingForBot) {
+                targetChat = chat;
+                break;
+            }
+        }
+        
+        if (targetChat) {
+            targetChat.messages.push({
+                type: 'bot',
+                content: chatInfo.message,
+                timestamp: chatInfo.timestamp
+            });
+            targetChat.lastMessage = chatInfo.message;
+            targetChat.lastTime = chatInfo.timestamp;
+            targetChat.waitingForBot = false;
+        }
+    }
+    
+    // 更新聊天列表
+    updateChatList();
+    
+    // 如果当前选中的聊天有新消息，更新聊天内容
+    if (currentChatId && chatData.has(currentChatId)) {
+        updateChatMessages(currentChatId);
+    }
+}
+
+function updateChatList() {
+    const chatList = document.getElementById('chat-list');
+    
+    if (chatData.size === 0) {
+        chatList.innerHTML = `
+            <div class="text-muted text-center p-3">
+                <i class="fas fa-comments fa-2x mb-2"></i>
+                <br>暂无聊天记录
+            </div>
+        `;
+        return;
+    }
+    
+    // 按最后消息时间排序
+    const sortedChats = Array.from(chatData.values()).sort((a, b) => {
+        return new Date(b.lastTime) - new Date(a.lastTime);
+    });
+    
+    chatList.innerHTML = '';
+    
+    sortedChats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = `chat-item ${currentChatId === chat.sessionId ? 'active' : ''}`;
+        chatItem.onclick = () => selectChat(chat.sessionId);
+        
+        const unreadBadge = chat.unreadCount > 0 ? 
+            `<span class="chat-item-unread">${chat.unreadCount > 99 ? '99+' : chat.unreadCount}</span>` : '';
+        
+        chatItem.innerHTML = `
+            <div class="chat-item-name">${escapeHtml(chat.userName)}</div>
+            <div class="chat-item-info">ID: ${chat.userId} | 商品: ${chat.productId}</div>
+            <div class="chat-item-last-message">${escapeHtml(chat.lastMessage)}</div>
+            <div class="chat-item-time">${formatTime(chat.lastTime)}</div>
+            ${unreadBadge}
+        `;
+        
+        chatList.appendChild(chatItem);
+    });
+}
+
+function selectChat(sessionId) {
+    currentChatId = sessionId;
+    
+    // 清除未读数
+    if (chatData.has(sessionId)) {
+        chatData.get(sessionId).unreadCount = 0;
+    }
+    
+    // 更新聊天列表显示
+    updateChatList();
+    
+    // 更新聊天内容
+    updateChatMessages(sessionId);
+    
+    // 更新聊天标题
+    const chat = chatData.get(sessionId);
+    const chatTitle = document.getElementById('chat-title');
+    chatTitle.innerHTML = `
+        <i class="fas fa-user me-1"></i>
+        ${escapeHtml(chat.userName)} 
+        <small class="text-muted">(ID: ${chat.userId})</small>
+    `;
+}
+
+function updateChatMessages(sessionId) {
+    const chatMessages = document.getElementById('chat-messages');
+    const chat = chatData.get(sessionId);
+    
+    if (!chat) {
+        chatMessages.innerHTML = `
+            <div class="text-muted text-center p-3">
+                <i class="fas fa-comment-dots fa-2x mb-2"></i>
+                <br>聊天记录不存在
+            </div>
+        `;
+        return;
+    }
+    
+    if (chat.messages.length === 0) {
+        chatMessages.innerHTML = `
+            <div class="text-muted text-center p-3">
+                <i class="fas fa-comment-dots fa-2x mb-2"></i>
+                <br>暂无聊天记录
+            </div>
+        `;
+        return;
+    }
+    
+    chatMessages.innerHTML = '';
+    
+    chat.messages.forEach(message => {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${message.type === 'user' ? 'user-message' : 'bot-message'}`;
+        
+        messageDiv.innerHTML = `
+            <div class="chat-message-content">${escapeHtml(message.content)}</div>
+            <div class="chat-message-time">${message.timestamp}</div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+    });
+    
+    // 滚动到底部
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function formatTime(timeString) {
+    try {
+        const date = new Date(timeString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMinutes = Math.floor(diffMs / (1000 * 60));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
+        if (diffMinutes < 1) {
+            return '刚刚';
+        } else if (diffMinutes < 60) {
+            return `${diffMinutes}分钟前`;
+        } else if (diffHours < 24) {
+            return `${diffHours}小时前`;
+        } else if (diffDays < 7) {
+            return `${diffDays}天前`;
+        } else {
+            return date.toLocaleDateString('zh-CN');
+        }
+    } catch (e) {
+        return timeString;
+    }
+} 

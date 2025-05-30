@@ -112,13 +112,18 @@
                 </div>
             </div>
 
-            <!-- 右侧：配置管理 -->
+            <!-- 右侧：配置管理和聊天窗口 -->
             <div class="col-md-4">
                 <div class="card shadow-sm">
                     <div class="card-header bg-light">
                         <ul class="nav nav-tabs card-header-tabs" id="config-tabs" role="tablist">
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="prompts-tab" data-bs-toggle="tab" data-bs-target="#prompts" type="button" role="tab">
+                                <button class="nav-link active" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat" type="button" role="tab">
+                                    <i class="fas fa-comments me-1"></i>聊天窗口
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="prompts-tab" data-bs-toggle="tab" data-bs-target="#prompts" type="button" role="tab">
                                     <i class="fas fa-file-alt me-1"></i>提示词
                                 </button>
                             </li>
@@ -131,8 +136,40 @@
                     </div>
                     <div class="card-body p-0">
                         <div class="tab-content" id="config-tab-content">
+                            <!-- 聊天窗口 -->
+                            <div class="tab-pane fade show active" id="chat" role="tabpanel">
+                                <div class="row h-100 chat-container">
+                                    <!-- 左侧：聊天列表 -->
+                                    <div class="col-5 border-end chat-list-container">
+                                        <div class="p-2 border-bottom">
+                                            <h6 class="mb-0"><i class="fas fa-list me-1"></i>聊天列表</h6>
+                                        </div>
+                                        <div id="chat-list" class="chat-list">
+                                            <div class="text-muted text-center p-3">
+                                                <i class="fas fa-comments fa-2x mb-2"></i>
+                                                <br>暂无聊天记录
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- 右侧：聊天内容 -->
+                                    <div class="col-7 chat-content-container">
+                                        <div class="p-2 border-bottom">
+                                            <h6 class="mb-0" id="chat-title">
+                                                <i class="fas fa-user me-1"></i>选择聊天对象
+                                            </h6>
+                                        </div>
+                                        <div id="chat-messages" class="chat-messages">
+                                            <div class="text-muted text-center p-3">
+                                                <i class="fas fa-comment-dots fa-2x mb-2"></i>
+                                                <br>请从左侧选择聊天对象
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- 提示词管理 -->
-                            <div class="tab-pane fade show active" id="prompts" role="tabpanel">
+                            <div class="tab-pane fade" id="prompts" role="tabpanel">
                                 <div class="p-3">
                                     <div class="mb-3">
                                         <label class="form-label">选择提示词文件:</label>
