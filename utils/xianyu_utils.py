@@ -1,11 +1,9 @@
 import json
 import time
 import hashlib
-import uuid
 import base64
 import struct
-from typing import Any, Dict, List, Union
-import msgpack
+from typing import Any, Dict, List
 
 
 def trans_cookies(cookies_str: str) -> Dict[str, str]:
@@ -21,58 +19,41 @@ def trans_cookies(cookies_str: str) -> Dict[str, str]:
     return cookies
 
 
-def generate_mid() -> str:
-    """生成mid"""
-    import random
-    random_part = int(1000 * random.random())
-    timestamp = int(time.time() * 1000)
-    return f"{random_part}{timestamp} 0"
-
-
 def generate_uuid() -> str:
-    """生成uuid"""
-    timestamp = int(time.time() * 1000)
-    return f"-{timestamp}1"
-
-
-def generate_device_id(user_id: str) -> str:
-    """生成设备ID"""
+    """生成UUID字符串"""
     import random
-    
-    # 字符集
-    chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-    result = []
-    
-    for i in range(36):
-        if i in [8, 13, 18, 23]:
-            result.append("-")
-        elif i == 14:
-            result.append("4")
-        else:
-            if i == 19:
-                # 对于位置19，需要特殊处理
-                rand_val = int(16 * random.random())
-                result.append(chars[(rand_val & 0x3) | 0x8])
-            else:
-                rand_val = int(16 * random.random())
-                result.append(chars[rand_val])
-    
-    return ''.join(result) + "-" + user_id
+    import string
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=32))
+
+
+def generate_mid() -> str:
+    """生成消息ID"""
+    import random
+    timestamp = str(int(time.time() * 1000))
+    random_num = str(random.randint(10000, 99999))
+    return timestamp + " " + random_num
+
+
+def generate_device_id(unb: str) -> str:
+    """根据unb生成设备ID"""
+    base_string = f"xianyu_device_{unb}_{int(time.time())}"
+    hash_object = hashlib.md5(base_string.encode())
+    return hash_object.hexdigest()
 
 
 def generate_sign(t: str, token: str, data: str) -> str:
     """生成签名"""
-    app_key = "34839810"
-    msg = f"{token}&{t}&{app_key}&{data}"
+    # 构造待签名字符串
+    msg = f'{token}&{t}&34839810&{data}'
     
-    # 使用MD5生成签名
+    # 计算MD5哈希
     md5_hash = hashlib.md5()
     md5_hash.update(msg.encode('utf-8'))
     return md5_hash.hexdigest()
 
 
 class MessagePackDecoder:
-    """MessagePack解码器的简化实现"""
+    """MessagePack解码器的自主实现（无需外部依赖）"""
     
     def __init__(self, data: bytes):
         self.data = data
@@ -93,22 +74,203 @@ class MessagePackDecoder:
         self.pos += count
         return result
     
+    def read_uint8(self) -> int:
+        return self.read_byte()
+    
     def read_uint16(self) -> int:
         return struct.unpack('>H', self.read_bytes(2))[0]
     
     def read_uint32(self) -> int:
         return struct.unpack('>I', self.read_bytes(4))[0]
     
+    def read_uint64(self) -> int:
+        return struct.unpack('>Q', self.read_bytes(8))[0]
+    
+    def read_int8(self) -> int:
+        return struct.unpack('>b', self.read_bytes(1))[0]
+    
+    def read_int16(self) -> int:
+        return struct.unpack('>h', self.read_bytes(2))[0]
+    
+    def read_int32(self) -> int:
+        return struct.unpack('>i', self.read_bytes(4))[0]
+    
+    def read_int64(self) -> int:
+        return struct.unpack('>q', self.read_bytes(8))[0]
+    
+    def read_float32(self) -> float:
+        return struct.unpack('>f', self.read_bytes(4))[0]
+    
+    def read_float64(self) -> float:
+        return struct.unpack('>d', self.read_bytes(8))[0]
+    
     def read_string(self, length: int) -> str:
         return self.read_bytes(length).decode('utf-8')
     
+    def read_binary(self, length: int) -> bytes:
+        return self.read_bytes(length)
+    
+    def decode_value(self) -> Any:
+        """解码单个MessagePack值"""
+        if self.pos >= self.length:
+            raise ValueError("Unexpected end of data")
+        
+        first_byte = self.read_byte()
+        
+        # Positive fixint (0x00 - 0x7f)
+        if first_byte <= 0x7f:
+            return first_byte
+        
+        # Fixmap (0x80 - 0x8f)
+        elif 0x80 <= first_byte <= 0x8f:
+            size = first_byte & 0x0f
+            return self.decode_map(size)
+        
+        # Fixarray (0x90 - 0x9f)
+        elif 0x90 <= first_byte <= 0x9f:
+            size = first_byte & 0x0f
+            return self.decode_array(size)
+        
+        # Fixstr (0xa0 - 0xbf)
+        elif 0xa0 <= first_byte <= 0xbf:
+            size = first_byte & 0x1f
+            return self.read_string(size)
+        
+        # nil
+        elif first_byte == 0xc0:
+            return None
+        
+        # false
+        elif first_byte == 0xc2:
+            return False
+        
+        # true
+        elif first_byte == 0xc3:
+            return True
+        
+        # bin 8
+        elif first_byte == 0xc4:
+            size = self.read_uint8()
+            return self.read_binary(size)
+        
+        # bin 16
+        elif first_byte == 0xc5:
+            size = self.read_uint16()
+            return self.read_binary(size)
+        
+        # bin 32
+        elif first_byte == 0xc6:
+            size = self.read_uint32()
+            return self.read_binary(size)
+        
+        # float 32
+        elif first_byte == 0xca:
+            return self.read_float32()
+        
+        # float 64
+        elif first_byte == 0xcb:
+            return self.read_float64()
+        
+        # uint 8
+        elif first_byte == 0xcc:
+            return self.read_uint8()
+        
+        # uint 16
+        elif first_byte == 0xcd:
+            return self.read_uint16()
+        
+        # uint 32
+        elif first_byte == 0xce:
+            return self.read_uint32()
+        
+        # uint 64
+        elif first_byte == 0xcf:
+            return self.read_uint64()
+        
+        # int 8
+        elif first_byte == 0xd0:
+            return self.read_int8()
+        
+        # int 16
+        elif first_byte == 0xd1:
+            return self.read_int16()
+        
+        # int 32
+        elif first_byte == 0xd2:
+            return self.read_int32()
+        
+        # int 64
+        elif first_byte == 0xd3:
+            return self.read_int64()
+        
+        # str 8
+        elif first_byte == 0xd9:
+            size = self.read_uint8()
+            return self.read_string(size)
+        
+        # str 16
+        elif first_byte == 0xda:
+            size = self.read_uint16()
+            return self.read_string(size)
+        
+        # str 32
+        elif first_byte == 0xdb:
+            size = self.read_uint32()
+            return self.read_string(size)
+        
+        # array 16
+        elif first_byte == 0xdc:
+            size = self.read_uint16()
+            return self.decode_array(size)
+        
+        # array 32
+        elif first_byte == 0xdd:
+            size = self.read_uint32()
+            return self.decode_array(size)
+        
+        # map 16
+        elif first_byte == 0xde:
+            size = self.read_uint16()
+            return self.decode_map(size)
+        
+        # map 32
+        elif first_byte == 0xdf:
+            size = self.read_uint32()
+            return self.decode_map(size)
+        
+        # Negative fixint (0xe0 - 0xff)
+        elif 0xe0 <= first_byte <= 0xff:
+            return struct.unpack('b', bytes([first_byte]))[0]
+        
+        else:
+            raise ValueError(f"Unknown MessagePack type: 0x{first_byte:02x}")
+    
+    def decode_array(self, size: int) -> list:
+        """解码数组"""
+        result = []
+        for _ in range(size):
+            result.append(self.decode_value())
+        return result
+    
+    def decode_map(self, size: int) -> dict:
+        """解码映射/字典"""
+        result = {}
+        for _ in range(size):
+            key = self.decode_value()
+            value = self.decode_value()
+            # 确保key是字符串类型（对于字典）
+            if isinstance(key, bytes):
+                key = key.decode('utf-8')
+            result[key] = value
+        return result
+    
     def decode(self) -> Any:
-        """简化的MessagePack解码"""
+        """解码MessagePack数据"""
         try:
-            # 使用msgpack库进行解码
-            return msgpack.unpackb(self.data, raw=False, strict_map_key=False)
+            self.pos = 0  # 重置位置
+            return self.decode_value()
         except Exception as e:
-            # 如果msgpack解码失败，返回原始数据的base64编码
+            # 如果自主解码失败，返回原始数据的base64编码
             return base64.b64encode(self.data).decode('utf-8')
 
 

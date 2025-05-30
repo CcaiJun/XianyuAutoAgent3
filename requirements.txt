@@ -3,7 +3,6 @@ websockets==13.1
 loguru==0.7.3
 python-dotenv==1.0.1
 requests==2.32.3
-msgpack==1.0.8
 flask==2.3.3
 flask-socketio==5.3.6
 psutil==5.9.6
