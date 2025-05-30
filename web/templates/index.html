@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>闲鱼自动代理系统</title>
+    <!-- 先加载Socket.IO库 -->
+    <script src="/static/js/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+        .header {
+            background: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo h1 {
+            color: #333;
+            font-size: 20px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .logout-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .nav-menu {
+            background: white;
+            border-bottom: 1px solid #eee;
+            padding: 0 2rem;
+        }
+        .nav-tabs {
+            display: flex;
+            gap: 0;
+        }
+        .nav-tab {
+            background: none;
+            border: none;
+            padding: 1rem 2rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s;
+        }
+        .nav-tab.active {
+            background: #f8f9fa;
+            border-bottom-color: #007bff;
+            color: #007bff;
+        }
+        .nav-tab:hover {
+            background: #f8f9fa;
+        }
+        .main-content {
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .control-panel {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        .control-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .btn-start {
+            background: #27ae60;
+            color: white;
+        }
+        .btn-stop {
+            background: #e74c3c;
+            color: white;
+        }
+        .btn-save {
+            background: #007bff;
+            color: white;
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+        .status-panel {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+        .status-item:last-child {
+            border-bottom: none;
+        }
+        .status-value {
+            font-weight: 500;
+        }
+        .status-running {
+            color: #27ae60;
+        }
+        .status-stopped {
+            color: #e74c3c;
+        }
+        .logs-panel {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .logs-header {
+            background: #f8f9fa;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #eee;
+            font-weight: 500;
+        }
+        .logs-content {
+            height: 300px;
+            overflow-y: auto;
+            padding: 1rem;
+            background: #1e1e1e;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin-bottom: 0.5rem;
+            word-wrap: break-word;
+        }
+        .log-error { color: #ff6b6b; }
+        .log-warning { color: #feca57; }
+        .log-info { color: #48dbfb; }
+        .log-debug { color: #a5a5a5; }
+        
+        /* 配置页面样式 */
+        .config-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #333;
+        }
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            resize: vertical;
+        }
+        .form-help {
+            font-size: 12px;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+        .prompt-tabs {
+            display: flex;
+            margin-bottom: 1rem;
+        }
+        .prompt-tab {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            margin-right: 2px;
+        }
+        .prompt-tab.active {
+            background: white;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+            position: relative;
+            z-index: 1;
+        }
+        .prompt-content {
+            border: 1px solid #ddd;
+            border-radius: 0 4px 4px 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <h1>闲鱼自动代理系统</h1>
+        </div>
+        <div class="user-info">
+            <span>欢迎，管理员</span>
+            <button class="logout-btn" onclick="logout()">退出</button>
+        </div>
+    </div>
+
+    <div class="nav-menu">
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('dashboard')">仪表盘</button>
+            <button class="nav-tab" onclick="switchTab('config')">环境配置</button>
+            <button class="nav-tab" onclick="switchTab('prompts')">提示词管理</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <!-- 仪表盘标签页 -->
+        <div id="dashboard" class="tab-content active">
+            <div class="control-panel">
+                <h2>程序控制</h2>
+                <div class="control-buttons">
+                    <button class="btn btn-start" onclick="startProgram()">启动程序</button>
+                    <button class="btn btn-stop" onclick="stopProgram()">停止程序</button>
+                </div>
+            </div>
+
+            <div class="status-panel">
+                <h2>系统状态</h2>
+                <div class="status-item">
+                    <span>程序状态</span>
+                    <span id="processStatus" class="status-value status-stopped">已停止</span>
+                </div>
+                <div class="status-item">
+                    <span>进程ID</span>
+                    <span id="processPid" class="status-value">-</span>
+                </div>
+                <div class="status-item">
+                    <span>最后检查</span>
+                    <span id="lastHeartbeat" class="status-value">-</span>
+                </div>
+            </div>
+
+            <div class="logs-panel">
+                <div class="logs-header">实时日志</div>
+                <div class="logs-content" id="logsContent">
+                    正在加载日志...
+                </div>
+            </div>
+        </div>
+
+        <!-- 环境配置标签页 -->
+        <div id="config" class="tab-content">
+            <div class="config-section">
+                <h2>环境变量配置</h2>
+                <form id="configForm">
+                    <div class="form-group">
+                        <label class="form-label" for="apiKey">API密钥</label>
+                        <input type="password" id="apiKey" name="apiKey" class="form-input">
+                        <div class="form-help">阿里云通义千问API密钥</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="cookiesStr">Cookies字符串</label>
+                        <textarea id="cookiesStr" name="cookiesStr" class="form-textarea" placeholder="粘贴闲鱼Cookies..."></textarea>
+                        <div class="form-help">从浏览器开发者工具中复制闲鱼的Cookies</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="modelBaseUrl">模型API地址</label>
+                        <input type="text" id="modelBaseUrl" name="modelBaseUrl" class="form-input" value="https://dashscope.aliyuncs.com/compatible-mode/v1">
+                        <div class="form-help">通义千问兼容OpenAI的API地址</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="modelName">模型名称</label>
+                        <input type="text" id="modelName" name="modelName" class="form-input" value="qwen-max">
+                        <div class="form-help">使用的AI模型名称</div>
+                    </div>
+                    <button type="button" class="btn btn-save" onclick="saveConfig()">保存配置</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 提示词管理标签页 -->
+        <div id="prompts" class="tab-content">
+            <div class="config-section">
+                <h2>AI角色提示词编辑</h2>
+                <div class="prompt-tabs">
+                    <button class="prompt-tab active" onclick="switchPrompt('classify')">分类代理</button>
+                    <button class="prompt-tab" onclick="switchPrompt('price')">价格代理</button>
+                    <button class="prompt-tab" onclick="switchPrompt('tech')">技术代理</button>
+                    <button class="prompt-tab" onclick="switchPrompt('default')">默认代理</button>
+                </div>
+                <div class="prompt-content">
+                    <form id="promptForm">
+                        <div class="form-group">
+                            <label class="form-label" id="promptLabel">提示词内容</label>
+                            <textarea id="promptContent" name="promptContent" class="form-textarea" placeholder="请输入提示词内容..."></textarea>
+                            <div class="form-help" id="promptHelp">定义AI代理的角色和行为规则</div>
+                        </div>
+                        <button type="button" class="btn btn-save" onclick="savePrompt()">保存提示词</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let currentPromptType = 'classify';
+
+        // 初始化WebSocket连接
+        function initWebSocket() {
+            socket = io();
+            
+            socket.on('connect', function() {
+                console.log('WebSocket连接成功');
+                document.getElementById('logsContent').innerHTML = '<div class="log-entry log-info">[' + new Date().toLocaleTimeString() + '] WebSocket连接已建立</div>';
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('WebSocket连接断开');
+                const logsContent = document.getElementById('logsContent');
+                if (logsContent) {
+                    addLogEntry({
+                        type: 'warning',
+                        timestamp: new Date().toLocaleTimeString(),
+                        message: 'WebSocket连接已断开'
+                    });
+                }
+            });
+            
+            socket.on('new_log', function(data) {
+                addLogEntry(data);
+            });
+            
+            socket.on('status_update', function(data) {
+                updateStatusFromSocket(data);
+            });
+            
+            socket.on('heartbeat', function(data) {
+                // 更新心跳时间显示
+                const lastHeartbeat = document.getElementById('lastHeartbeat');
+                if (lastHeartbeat && data.server_time) {
+                    lastHeartbeat.textContent = data.server_time;
+                }
+            });
+        }
+
+        // 切换标签页
+        function switchTab(tabName) {
+            // 隐藏所有标签页内容
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            // 移除所有导航标签的激活状态
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // 显示选中的标签页
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+            
+            // 如果切换到配置页面，加载配置
+            if (tabName === 'config') {
+                loadConfig();
+            } else if (tabName === 'prompts') {
+                loadPrompts();
+            }
+        }
+
+        // 切换提示词类型
+        function switchPrompt(promptType) {
+            currentPromptType = promptType;
+            // 移除所有提示词标签的激活状态
+            document.querySelectorAll('.prompt-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            // 激活当前标签
+            event.target.classList.add('active');
+            
+            // 加载对应的提示词
+            loadPromptContent(promptType);
+        }
+
+        // 更新状态
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const processStatus = document.getElementById('processStatus');
+                    const processPid = document.getElementById('processPid');
+                    const lastHeartbeat = document.getElementById('lastHeartbeat');
+                    
+                    if (data.data.process.running) {
+                        processStatus.textContent = '运行中';
+                        processStatus.className = 'status-value status-running';
+                        processPid.textContent = data.data.process.pid || '-';
+                    } else {
+                        processStatus.textContent = '已停止';
+                        processStatus.className = 'status-value status-stopped';
+                        processPid.textContent = '-';
+                    }
+                    
+                    lastHeartbeat.textContent = data.data.heartbeat.last_check || data.data.heartbeat.last_heartbeat || '-';
+                }
+            } catch (error) {
+                console.error('获取状态失败:', error);
+            }
+        }
+
+        // 从WebSocket更新状态
+        function updateStatusFromSocket(data) {
+            const processStatus = document.getElementById('processStatus');
+            const processPid = document.getElementById('processPid');
+            const lastHeartbeat = document.getElementById('lastHeartbeat');
+            
+            // 处理不同类型的状态更新
+            if (data.type === 'initial' || data.type === 'requested') {
+                // 完整状态数据
+                if (data.data && data.data.process) {
+                    if (data.data.process.running) {
+                        processStatus.textContent = '运行中';
+                        processStatus.className = 'status-value status-running';
+                        processPid.textContent = data.data.process.pid || '-';
+                    } else {
+                        processStatus.textContent = '已停止';
+                        processStatus.className = 'status-value status-stopped';
+                        processPid.textContent = '-';
+                    }
+                }
+                
+                if (data.data && data.data.heartbeat) {
+                    lastHeartbeat.textContent = data.data.heartbeat.last_check || data.data.heartbeat.last_heartbeat || '-';
+                }
+            } else {
+                // 兼容旧格式
+                if (data.running !== undefined) {
+                    if (data.running) {
+                        processStatus.textContent = '运行中';
+                        processStatus.className = 'status-value status-running';
+                        processPid.textContent = data.pid || '-';
+                    } else {
+                        processStatus.textContent = '已停止';
+                        processStatus.className = 'status-value status-stopped';
+                        processPid.textContent = '-';
+                    }
+                    
+                    lastHeartbeat.textContent = new Date().toLocaleTimeString();
+                }
+            }
+        }
+
+        // 启动程序
+        async function startProgram() {
+            try {
+                const response = await fetch('/api/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                const data = await response.json();
+                alert(data.message);
+                updateStatus();
+            } catch (error) {
+                alert('启动失败: ' + error.message);
+            }
+        }
+
+        // 停止程序
+        async function stopProgram() {
+            try {
+                const response = await fetch('/api/stop', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                const data = await response.json();
+                alert(data.message);
+                updateStatus();
+            } catch (error) {
+                alert('停止失败: ' + error.message);
+            }
+        }
+
+        // 退出登录
+        async function logout() {
+            try {
+                const response = await fetch('/auth/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                if (response.ok) {
+                    window.location.href = '/auth/login';
+                }
+            } catch (error) {
+                console.error('退出失败:', error);
+            }
+        }
+
+        // 添加日志条目
+        function addLogEntry(logData) {
+            const logsContent = document.getElementById('logsContent');
+            if (!logsContent) return;
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${logData.type}`;
+            logEntry.textContent = `[${logData.timestamp}] ${logData.message}`;
+            
+            logsContent.appendChild(logEntry);
+            logsContent.scrollTop = logsContent.scrollHeight;
+            
+            // 限制日志条目数量
+            while (logsContent.children.length > 1000) {
+                logsContent.removeChild(logsContent.firstChild);
+            }
+        }
+
+        // 加载历史日志
+        async function loadLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                if (response.ok) {
+                    const logs = await response.json();
+                    
+                    const logsContent = document.getElementById('logsContent');
+                    logsContent.innerHTML = '';
+                    
+                    if (logs && logs.length > 0) {
+                        logs.forEach(log => {
+                            addLogEntry(log);
+                        });
+                    } else {
+                        logsContent.innerHTML = '<div class="log-entry log-info">[' + new Date().toLocaleTimeString() + '] 暂无日志记录</div>';
+                    }
+                } else {
+                    document.getElementById('logsContent').innerHTML = '<div class="log-entry log-error">[' + new Date().toLocaleTimeString() + '] 加载日志失败</div>';
+                }
+            } catch (error) {
+                console.error('加载日志失败:', error);
+                document.getElementById('logsContent').innerHTML = '<div class="log-entry log-error">[' + new Date().toLocaleTimeString() + '] 加载日志异常: ' + error.message + '</div>';
+            }
+        }
+
+        // 加载配置
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                if (response.ok) {
+                    const config = await response.json();
+                    if (config.status === 'success') {
+                        document.getElementById('apiKey').value = config.data.apiKey || '';
+                        document.getElementById('cookiesStr').value = config.data.cookiesStr || '';
+                        document.getElementById('modelBaseUrl').value = config.data.modelBaseUrl || '';
+                        document.getElementById('modelName').value = config.data.modelName || '';
+                    }
+                }
+            } catch (error) {
+                console.error('加载配置失败:', error);
+            }
+        }
+
+        // 保存配置
+        async function saveConfig() {
+            try {
+                const formData = {
+                    apiKey: document.getElementById('apiKey').value,
+                    cookiesStr: document.getElementById('cookiesStr').value,
+                    modelBaseUrl: document.getElementById('modelBaseUrl').value,
+                    modelName: document.getElementById('modelName').value
+                };
+
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+                alert(result.message);
+            } catch (error) {
+                alert('保存配置失败: ' + error.message);
+            }
+        }
+
+        // 加载提示词
+        async function loadPrompts() {
+            loadPromptContent(currentPromptType);
+        }
+
+        // 加载特定类型的提示词内容
+        async function loadPromptContent(promptType) {
+            try {
+                const response = await fetch(`/api/prompts/${promptType}`);
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        document.getElementById('promptContent').value = result.data.content || '';
+                        document.getElementById('promptLabel').textContent = `${getPromptTypeName(promptType)}提示词内容`;
+                        document.getElementById('promptHelp').textContent = getPromptTypeDescription(promptType);
+                    }
+                }
+            } catch (error) {
+                console.error('加载提示词失败:', error);
+            }
+        }
+
+        // 保存提示词
+        async function savePrompt() {
+            try {
+                const content = document.getElementById('promptContent').value;
+                
+                const response = await fetch(`/api/prompts/${currentPromptType}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ content: content })
+                });
+
+                const result = await response.json();
+                alert(result.message);
+            } catch (error) {
+                alert('保存提示词失败: ' + error.message);
+            }
+        }
+
+        // 获取提示词类型名称
+        function getPromptTypeName(type) {
+            const names = {
+                'classify': '分类代理',
+                'price': '价格代理',
+                'tech': '技术代理',
+                'default': '默认代理'
+            };
+            return names[type] || type;
+        }
+
+        // 获取提示词类型描述
+        function getPromptTypeDescription(type) {
+            const descriptions = {
+                'classify': '负责判断用户消息的意图类型（价格、技术、默认）',
+                'price': '专门处理价格议价相关的对话',
+                'tech': '专门处理技术参数和产品功能相关的对话',
+                'default': '处理其他通用类型的对话'
+            };
+            return descriptions[type] || '定义AI代理的角色和行为规则';
+        }
+
+        // 页面初始化
+        window.addEventListener('load', function() {
+            initWebSocket();
+            updateStatus();
+            loadLogs();
+            
+            // 定期更新状态
+            setInterval(updateStatus, 5000);
+        });
+    </script>
+</body>
+</html> 
