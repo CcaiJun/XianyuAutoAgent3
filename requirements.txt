@@ -6,3 +6,4 @@ requests==2.32.3
 flask==2.3.3
 flask-socketio==5.3.6
 psutil==5.9.6
+werkzeug==2.3.7

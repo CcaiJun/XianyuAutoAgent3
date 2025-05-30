@@ -4,9 +4,83 @@ let autoScroll = true;
 let currentPromptFile = '';
 let envData = {};
 
+// 认证相关函数
+async function checkAuthStatus() {
+    try {
+        const response = await fetch('/api/check_auth');
+        const data = await response.json();
+        
+        if (data.logged_in) {
+            // 更新用户名显示
+            const usernameDisplay = document.getElementById('username-display');
+            if (usernameDisplay) {
+                usernameDisplay.textContent = data.username || 'admin';
+            }
+            return true;
+        } else {
+            // 未登录，跳转到登录页面
+            window.location.href = '/login';
+            return false;
+        }
+    } catch (error) {
+        console.error('检查登录状态失败:', error);
+        // 网络错误时也跳转到登录页面
+        window.location.href = '/login';
+        return false;
+    }
+}
+
+async function logout() {
+    try {
+        const response = await fetch('/api/logout', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            showToast('已成功登出', 'success');
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 1000);
+        } else {
+            showToast('登出失败: ' + data.message, 'error');
+        }
+    } catch (error) {
+        console.error('登出失败:', error);
+        showToast('登出过程中发生错误', 'error');
+    }
+}
+
+// 处理API请求中的认证错误
+async function handleApiResponse(response) {
+    if (response.status === 401) {
+        showToast('登录已过期，请重新登录', 'warning');
+        setTimeout(() => {
+            window.location.href = '/login';
+        }, 2000);
+        return null;
+    }
+    return response;
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
+    // 首先检查登录状态
+    checkAuthStatus().then(isLoggedIn => {
+        if (isLoggedIn) {
+            initializeApp();
+        }
+    });
+    
+    // 绑定登出按钮事件
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', logout);
+    }
 });
 
 function initializeApp() {
@@ -21,6 +95,9 @@ function initializeApp() {
     
     // 设置定时刷新状态
     setInterval(refreshStatus, 5000);
+    
+    // 设置定时检查登录状态（每5分钟检查一次）
+    setInterval(checkAuthStatus, 300000);
 }
 
 // 初始化WebSocket连接
@@ -61,7 +138,10 @@ async function startMain() {
             body: JSON.stringify({})
         });
         
-        const result = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const result = await handledResponse.json();
         
         if (result.status === 'success') {
             showToast('success', result.message);
@@ -95,7 +175,10 @@ async function stopMain() {
             body: JSON.stringify({})
         });
         
-        const result = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const result = await handledResponse.json();
         
         if (result.status === 'success') {
             showToast('success', result.message);
@@ -117,7 +200,10 @@ async function stopMain() {
 async function refreshStatus() {
     try {
         const response = await fetch('/api/status');
-        const status = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const status = await handledResponse.json();
         
         updateStatusDisplay(status);
         
@@ -197,7 +283,10 @@ function updateHeartbeatStatus(data) {
 async function loadHistoryLogs() {
     try {
         const response = await fetch('/api/logs');
-        const logs = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const logs = await handledResponse.json();
         
         const logContent = document.getElementById('log-content');
         logContent.innerHTML = '';
@@ -263,7 +352,10 @@ function scrollToBottom() {
 async function loadPrompts() {
     try {
         const response = await fetch('/api/prompts');
-        const prompts = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const prompts = await handledResponse.json();
         
         const promptSelect = document.getElementById('prompt-select');
         promptSelect.innerHTML = '<option value="">选择文件...</option>';
@@ -343,7 +435,10 @@ async function savePrompt() {
 async function loadEnv() {
     try {
         const response = await fetch('/api/env');
-        envData = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        envData = await handledResponse.json();
         
         renderEnvEditor();
         
@@ -424,7 +519,10 @@ async function saveEnv() {
             body: JSON.stringify({ env_vars: newEnvData })
         });
         
-        const result = await response.json();
+        const handledResponse = await handleApiResponse(response);
+        if (!handledResponse) return;
+        
+        const result = await handledResponse.json();
         
         if (result.status === 'success') {
             showToast('success', result.message);

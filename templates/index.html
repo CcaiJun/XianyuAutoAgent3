@@ -16,11 +16,18 @@
             <a class="navbar-brand" href="#">
                 <i class="fas fa-robot me-2"></i>闲鱼自动回复管理面板
             </a>
-            <div class="navbar-nav ms-auto">
+            <div class="navbar-nav ms-auto d-flex align-items-center">
                 <span class="navbar-text me-3">
                     <i class="fas fa-circle" id="status-indicator"></i>
                     <span id="status-text">已停止</span>
                 </span>
+                <span class="navbar-text me-3">
+                    <i class="fas fa-user me-1"></i>
+                    <span id="username-display">admin</span>
+                </span>
+                <button class="btn btn-outline-light btn-sm" id="logout-btn">
+                    <i class="fas fa-sign-out-alt me-1"></i>登出
+                </button>
             </div>
         </div>
     </nav>

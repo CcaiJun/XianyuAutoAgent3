@@ -1,5 +1,7 @@
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, session, redirect, url_for
 from flask_socketio import SocketIO, emit
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 import os
 import subprocess
 import psutil
@@ -7,14 +9,64 @@ import threading
 import time
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 import signal
 import sys
+from dotenv import load_dotenv
+
+# 加载Web UI配置
+def load_web_ui_config():
+    """加载Web UI配置文件"""
+    config_file = "web_ui_config.json"
+    default_config = {
+        "auth": {
+            "username": "admin",
+            "password": "admin123",
+            "secret_key": "xianyu_auto_agent_secret_key_change_this_in_production"
+        },
+        "session": {
+            "permanent_session_lifetime_hours": 24
+        }
+    }
+    
+    try:
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            return config
+        else:
+            # 如果配置文件不存在，创建默认配置文件
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(default_config, f, indent=4, ensure_ascii=False)
+            print(f"已创建默认配置文件: {config_file}")
+            return default_config
+    except Exception as e:
+        print(f"读取配置文件失败，使用默认配置: {e}")
+        return default_config
+
+# 加载配置
+web_ui_config = load_web_ui_config()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'xianyu_auto_agent_secret_key'
+app.config['SECRET_KEY'] = web_ui_config['auth']['secret_key']
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=web_ui_config['session']['permanent_session_lifetime_hours'])
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# 认证配置
+ADMIN_USERNAME = web_ui_config['auth']['username']
+ADMIN_PASSWORD_HASH = generate_password_hash(web_ui_config['auth']['password'])
+
+# 认证装饰器
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            if request.is_json:
+                return jsonify({'error': '需要登录', 'code': 401}), 401
+            return redirect(url_for('login_page'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # 全局变量
 main_process = None
@@ -200,11 +252,66 @@ def monitor_existing_process_with_logs(psutil_proc):
             break
 
 @app.route('/')
+@login_required
 def index():
     """主页面"""
     return render_template('index.html')
 
+@app.route('/login')
+def login_page():
+    """登录页面"""
+    if session.get('logged_in'):
+        return redirect(url_for('index'))
+    return render_template('login.html')
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    """用户登录"""
+    try:
+        data = request.get_json()
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        
+        if not username or not password:
+            return jsonify({'status': 'error', 'message': '用户名和密码不能为空'}), 400
+        
+        if username == ADMIN_USERNAME and check_password_hash(ADMIN_PASSWORD_HASH, password):
+            session['logged_in'] = True
+            session['username'] = username
+            session.permanent = True
+            app.logger.info(f"用户 {username} 登录成功")
+            return jsonify({'status': 'success', 'message': '登录成功'})
+        else:
+            app.logger.warning(f"用户 {username} 登录失败：用户名或密码错误")
+            return jsonify({'status': 'error', 'message': '用户名或密码错误'}), 401
+            
+    except Exception as e:
+        app.logger.error(f"登录过程中发生错误: {e}")
+        return jsonify({'status': 'error', 'message': '登录过程中发生错误'}), 500
+
+@app.route('/api/logout', methods=['POST'])
+@login_required
+def logout():
+    """用户登出"""
+    try:
+        username = session.get('username', 'unknown')
+        session.clear()
+        app.logger.info(f"用户 {username} 已登出")
+        return jsonify({'status': 'success', 'message': '已成功登出'})
+    except Exception as e:
+        app.logger.error(f"登出过程中发生错误: {e}")
+        return jsonify({'status': 'error', 'message': '登出过程中发生错误'}), 500
+
+@app.route('/api/check_auth')
+def check_auth():
+    """检查登录状态"""
+    return jsonify({
+        'logged_in': bool(session.get('logged_in')),
+        'username': session.get('username', '')
+    })
+
 @app.route('/api/status')
+@login_required
 def get_status():
     """获取系统状态"""
     global main_process, last_heartbeat_time, process_status
@@ -234,6 +341,7 @@ def get_status():
     })
 
 @app.route('/api/start', methods=['POST'])
+@login_required
 def start_main():
     """启动主程序"""
     global main_process, process_status
@@ -252,13 +360,21 @@ def start_main():
         data = request.get_json() or {}
         app.logger.info(f"启动主程序请求: {data}")
         
+        # 先加载.env文件到当前环境
+        load_dotenv()
+        
+        # 创建包含当前环境变量的字典
+        env = os.environ.copy()
+        
         # 启动主程序
         main_process = subprocess.Popen(
             [sys.executable, "main.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            bufsize=1
+            bufsize=1,
+            env=env,  # 传递环境变量给子进程
+            cwd=os.getcwd()  # 确保工作目录正确
         )
         
         process_status = "starting"
@@ -277,6 +393,7 @@ def start_main():
         return jsonify({"status": "error", "message": f"启动失败: {str(e)}"})
 
 @app.route('/api/stop', methods=['POST'])
+@login_required
 def stop_main():
     """停止主程序"""
     global main_process, process_status
@@ -311,11 +428,13 @@ def stop_main():
         return jsonify({"status": "error", "message": f"停止失败: {str(e)}"})
 
 @app.route('/api/logs')
+@login_required
 def get_logs():
     """获取历史日志"""
     return jsonify(list(log_buffer))
 
 @app.route('/api/prompts')
+@login_required
 def get_prompts():
     """获取所有提示词文件"""
     prompts_dir = "prompts"
@@ -335,6 +454,7 @@ def get_prompts():
     return jsonify(files)
 
 @app.route('/api/prompts/<filename>', methods=['GET', 'POST'])
+@login_required
 def manage_prompt(filename):
     """获取或更新提示词文件"""
     filepath = os.path.join("prompts", filename)
@@ -360,6 +480,7 @@ def manage_prompt(filename):
             return jsonify({"status": "error", "message": f"保存失败: {str(e)}"})
 
 @app.route('/api/env', methods=['GET', 'POST'])
+@login_required
 def manage_env():
     """获取或更新环境变量文件"""
     env_file = ".env"

@@ -1,5 +1,53 @@
 # 闲鱼自动回复 Web UI 管理界面
 
+## 🔐 登录验证
+
+为了保护管理界面的安全，Web UI 现在要求登录验证才能访问。
+
+### 默认登录信息
+- **用户名**: `admin`
+- **密码**: `admin123`
+
+### 修改登录信息
+
+Web UI 使用独立的配置文件 `web_ui_config.json` 存储登录信息，**不会在环境变量页面显示**，确保安全性。
+
+#### 方法1：直接编辑配置文件
+编辑 `web_ui_config.json` 文件：
+```json
+{
+    "auth": {
+        "username": "your_username",
+        "password": "your_secure_password",
+        "secret_key": "your_secret_key_change_this_in_production"
+    },
+    "session": {
+        "permanent_session_lifetime_hours": 24
+    }
+}
+```
+
+#### 方法2：复制示例文件
+```bash
+cp web_ui_config.example.json web_ui_config.json
+# 然后编辑 web_ui_config.json
+```
+
+#### 重要说明
+- 修改登录信息后需要**重启 Web UI** 才能生效
+- 配置文件已加入 `.gitignore`，不会被版本控制跟踪
+- 建议立即修改默认密码
+
+### 安全特性
+- ✅ 密码哈希存储 (PBKDF2)
+- ✅ Session 自动过期 (24小时)
+- ✅ 所有API接口保护
+- ✅ 自动登录状态检查
+- ✅ 安全登出功能
+- ✅ 登录配置与主程序配置分离
+
+---
+
 ## 功能介绍
 
 本Web UI为闲鱼自动回复机器人提供了一个功能完整的管理界面，包含以下功能：

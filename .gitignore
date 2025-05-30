@@ -52,3 +52,5 @@ htmlcov/
 .nox/
 .hypothesis/
 .coverage.* 
+# Web UI 配置文件（包含登录信息）
+web_ui_config.json
