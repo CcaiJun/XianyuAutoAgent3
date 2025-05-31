@@ -70,6 +70,7 @@ show_menu() {
     echo -e "  ${CYAN}9${NC}. 查看系统状态"
     echo -e "  ${CYAN}10${NC}. 查看日志"
     echo -e "  ${BLUE}11${NC}. Cookie管理"
+    echo -e "  ${BLUE}12${NC}. Web账户管理"
     echo -e "  ${RED}0${NC}. 退出"
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"
@@ -432,11 +433,394 @@ manage_cookies() {
     wait_for_key
 }
 
+# Web账户管理
+manage_web_accounts() {
+    echo -e "${BLUE}👤 Web账户管理选项...${NC}"
+    echo ""
+    echo -e "1. 查看当前登录配置"
+    echo -e "2. 修改用户名和密码"
+    echo -e "3. 重置为默认配置"
+    echo -e "4. 生成随机密码"
+    echo -e "0. 返回主菜单"
+    echo ""
+    echo -n "请选择: "
+    read -r web_choice
+    
+    case $web_choice in
+        1)
+            show_web_config
+            ;;
+        2)
+            change_web_credentials
+            ;;
+        3)
+            reset_web_config
+            ;;
+        4)
+            generate_random_password
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo -e "${RED}❌ 无效选择${NC}"
+            ;;
+    esac
+    
+    wait_for_key
+}
+
+# 显示当前Web配置
+show_web_config() {
+    echo -e "${CYAN}📋 当前Web登录配置:${NC}"
+    echo ""
+    
+    local config_file="$SCRIPT_DIR/web_ui_config.json"
+    
+    if [ -f "$config_file" ]; then
+        # 使用python解析JSON并显示配置（隐藏密码）
+        python3 -c "
+import json
+import sys
+try:
+    with open('$config_file', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    auth = config.get('auth', {})
+    session = config.get('session', {})
+    
+    print('🔐 认证配置:')
+    print(f'  用户名: {auth.get(\"username\", \"未设置\")}')
+    print(f'  密码: {\"*\" * len(auth.get(\"password\", \"\"))} (已隐藏)')
+    print(f'  密钥: {\"已设置\" if auth.get(\"secret_key\") else \"未设置\"}')
+    print()
+    print('⏱️  会话配置:')
+    print(f'  会话有效期: {session.get(\"permanent_session_lifetime_hours\", 24)} 小时')
+    
+except Exception as e:
+    print(f'❌ 读取配置失败: {e}')
+    sys.exit(1)
+"
+    else
+        echo -e "${YELLOW}⚠️ 配置文件不存在，将使用默认配置${NC}"
+        echo ""
+        echo -e "🔐 默认配置:"
+        echo -e "  用户名: admin"
+        echo -e "  密码: admin123"
+        echo -e "  会话有效期: 24 小时"
+    fi
+}
+
+# 修改Web登录凭据
+change_web_credentials() {
+    echo -e "${GREEN}🔑 修改Web登录凭据${NC}"
+    echo ""
+    
+    # 获取当前配置
+    local config_file="$SCRIPT_DIR/web_ui_config.json"
+    local current_username=""
+    local current_session_hours=24
+    
+    if [ -f "$config_file" ]; then
+        current_username=$(python3 -c "
+import json
+try:
+    with open('$config_file', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    print(config.get('auth', {}).get('username', 'admin'))
+except:
+    print('admin')
+")
+        current_session_hours=$(python3 -c "
+import json
+try:
+    with open('$config_file', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    print(config.get('session', {}).get('permanent_session_lifetime_hours', 24))
+except:
+    print(24)
+")
+    else
+        current_username="admin"
+    fi
+    
+    echo -e "当前用户名: ${CYAN}$current_username${NC}"
+    echo ""
+    
+    # 输入新的用户名
+    echo -n "请输入新用户名 (留空保持当前): "
+    read -r new_username
+    if [ -z "$new_username" ]; then
+        new_username="$current_username"
+    fi
+    
+    # 输入新密码
+    echo -n "请输入新密码: "
+    read -s new_password
+    echo ""
+    
+    if [ -z "$new_password" ]; then
+        echo -e "${RED}❌ 密码不能为空${NC}"
+        return
+    fi
+    
+    # 确认密码
+    echo -n "请再次输入新密码确认: "
+    read -s confirm_password
+    echo ""
+    
+    if [ "$new_password" != "$confirm_password" ]; then
+        echo -e "${RED}❌ 两次输入的密码不一致${NC}"
+        return
+    fi
+    
+    # 设置会话时长
+    echo -n "请输入会话有效期(小时，默认24): "
+    read -r session_hours
+    if [ -z "$session_hours" ] || ! [[ "$session_hours" =~ ^[0-9]+$ ]]; then
+        session_hours=$current_session_hours
+    fi
+    
+    # 生成随机密钥
+    local secret_key
+    secret_key=$(python3 -c "
+import secrets
+import string
+# 生成64字符的随机密钥
+alphabet = string.ascii_letters + string.digits + '_-'
+secret_key = ''.join(secrets.choice(alphabet) for _ in range(64))
+print(f'xianyu_web_secret_{secret_key}')
+")
+    
+    # 创建配置文件
+    python3 -c "
+import json
+config = {
+    'auth': {
+        'username': '$new_username',
+        'password': '$new_password',
+        'secret_key': '$secret_key'
+    },
+    'session': {
+        'permanent_session_lifetime_hours': $session_hours
+    }
+}
+
+try:
+    with open('$config_file', 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    print('✅ 配置保存成功')
+except Exception as e:
+    print(f'❌ 配置保存失败: {e}')
+    exit(1)
+"
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}✅ Web登录凭据修改成功！${NC}"
+        echo ""
+        echo -e "新的登录信息:"
+        echo -e "  用户名: ${CYAN}$new_username${NC}"
+        echo -e "  密码: ${CYAN}$new_password${NC}"
+        echo -e "  会话有效期: ${CYAN}$session_hours${NC} 小时"
+        echo ""
+        echo -e "${YELLOW}⚠️ 请重启Web界面以使新配置生效${NC}"
+        echo ""
+        echo -n "是否现在重启Web界面? (y/N): "
+        read -r restart_choice
+        if [[ "$restart_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${PURPLE}🔄 重启Web界面...${NC}"
+            restart_web
+        fi
+    else
+        echo -e "${RED}❌ 配置保存失败${NC}"
+    fi
+}
+
+# 重置Web配置为默认值
+reset_web_config() {
+    echo -e "${YELLOW}⚠️ 重置Web配置为默认值${NC}"
+    echo ""
+    echo -e "这将重置为以下默认配置:"
+    echo -e "  用户名: admin"
+    echo -e "  密码: admin123"
+    echo -e "  会话有效期: 24 小时"
+    echo ""
+    echo -n "确认重置? (y/N): "
+    read -r confirm_choice
+    
+    if [[ "$confirm_choice" =~ ^[Yy]$ ]]; then
+        local config_file="$SCRIPT_DIR/web_ui_config.json"
+        
+        # 生成随机密钥
+        local secret_key
+        secret_key=$(python3 -c "
+import secrets
+import string
+alphabet = string.ascii_letters + string.digits + '_-'
+secret_key = ''.join(secrets.choice(alphabet) for _ in range(64))
+print(f'xianyu_web_secret_{secret_key}')
+")
+        
+        python3 -c "
+import json
+config = {
+    'auth': {
+        'username': 'admin',
+        'password': 'admin123',
+        'secret_key': '$secret_key'
+    },
+    'session': {
+        'permanent_session_lifetime_hours': 24
+    }
+}
+
+try:
+    with open('$config_file', 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    print('✅ 配置重置成功')
+except Exception as e:
+    print(f'❌ 配置重置失败: {e}')
+    exit(1)
+"
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✅ Web配置已重置为默认值${NC}"
+            echo ""
+            echo -e "${YELLOW}⚠️ 请重启Web界面以使新配置生效${NC}"
+        else
+            echo -e "${RED}❌ 配置重置失败${NC}"
+        fi
+    else
+        echo -e "${BLUE}操作已取消${NC}"
+    fi
+}
+
+# 生成随机密码
+generate_random_password() {
+    echo -e "${CYAN}🎲 生成随机密码${NC}"
+    echo ""
+    
+    # 生成不同长度的随机密码
+    echo -e "生成的随机密码选项:"
+    echo ""
+    
+    for length in 8 12 16 20; do
+        local password
+        password=$(python3 -c "
+import secrets
+import string
+# 包含大小写字母、数字和特殊字符
+alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
+password = ''.join(secrets.choice(alphabet) for _ in range($length))
+print(password)
+")
+        echo -e "  ${length}位: ${GREEN}$password${NC}"
+    done
+    
+    echo ""
+    echo -e "${YELLOW}💡 建议选择12位或以上的密码以确保安全性${NC}"
+    echo ""
+    echo -n "选择一个密码长度后，将自动应用 (8/12/16/20，回车跳过): "
+    read -r length_choice
+    
+    if [[ "$length_choice" =~ ^(8|12|16|20)$ ]]; then
+        local chosen_password
+        chosen_password=$(python3 -c "
+import secrets
+import string
+alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
+password = ''.join(secrets.choice(alphabet) for _ in range($length_choice))
+print(password)
+")
+        
+        echo ""
+        echo -e "选择的密码: ${GREEN}$chosen_password${NC}"
+        echo ""
+        echo -n "是否使用此密码更新Web配置? (y/N): "
+        read -r apply_choice
+        
+        if [[ "$apply_choice" =~ ^[Yy]$ ]]; then
+            # 获取当前配置
+            local config_file="$SCRIPT_DIR/web_ui_config.json"
+            local current_username="admin"
+            local current_session_hours=24
+            
+            if [ -f "$config_file" ]; then
+                current_username=$(python3 -c "
+import json
+try:
+    with open('$config_file', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    print(config.get('auth', {}).get('username', 'admin'))
+except:
+    print('admin')
+")
+                current_session_hours=$(python3 -c "
+import json
+try:
+    with open('$config_file', 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    print(config.get('session', {}).get('permanent_session_lifetime_hours', 24))
+except:
+    print(24)
+")
+            fi
+            
+            # 生成新的密钥
+            local secret_key
+            secret_key=$(python3 -c "
+import secrets
+import string
+alphabet = string.ascii_letters + string.digits + '_-'
+secret_key = ''.join(secrets.choice(alphabet) for _ in range(64))
+print(f'xianyu_web_secret_{secret_key}')
+")
+            
+            # 更新配置
+            python3 -c "
+import json
+config = {
+    'auth': {
+        'username': '$current_username',
+        'password': '$chosen_password',
+        'secret_key': '$secret_key'
+    },
+    'session': {
+        'permanent_session_lifetime_hours': $current_session_hours
+    }
+}
+
+try:
+    with open('$config_file', 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    print('✅ 密码更新成功')
+except Exception as e:
+    print(f'❌ 密码更新失败: {e}')
+    exit(1)
+"
+            
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✅ 随机密码已应用到Web配置${NC}"
+                echo ""
+                echo -e "新的登录信息:"
+                echo -e "  用户名: ${CYAN}$current_username${NC}"
+                echo -e "  密码: ${GREEN}$chosen_password${NC}"
+                echo ""
+                echo -e "${YELLOW}⚠️ 请重启Web界面以使新配置生效${NC}"
+                echo -e "${YELLOW}⚠️ 请妥善保存新密码！${NC}"
+            else
+                echo -e "${RED}❌ 密码更新失败${NC}"
+            fi
+        fi
+    fi
+}
+
 # 主循环
 main_loop() {
     while true; do
         show_menu
-        echo -n "请输入选项 (0-11): "
+        echo -n "请输入选项 (0-12): "
         read -r choice
         
         case $choice in
@@ -473,6 +857,9 @@ main_loop() {
             11)
                 manage_cookies
                 ;;
+            12)
+                manage_web_accounts
+                ;;
             0)
                 clear_screen
                 echo -e "${GREEN}👋 感谢使用闲鱼自动代理系统管理器！${NC}"
@@ -480,7 +867,7 @@ main_loop() {
                 exit 0
                 ;;
             *)
-                echo -e "${RED}❌ 无效选择，请输入 0-11 之间的数字${NC}"
+                echo -e "${RED}❌ 无效选择，请输入 0-12 之间的数字${NC}"
                 sleep 2
                 ;;
         esac

@@ -1,8 +1,6 @@
 # 🚀 Xianyu AutoAgent - 智能闲鱼客服机器人系统    
 启动脚本
 ./menu.sh
-
-启动关闭bash web_ui_control.sh  
 修改登录密码 python change_web_ui_password.py
 
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/) [![LLM Powered](https://img.shields.io/badge/LLM-powered-FF6F61)](https://platform.openai.com/)
